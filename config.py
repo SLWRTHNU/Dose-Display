@@ -4,7 +4,7 @@ Configuration file for Nightscout BG Display
 
 # WiFi credentials
 WIFI_SSID = "2.4G"
-WIFI_PASSWORD = "JohnBerry"
+WIFI_PASSWORD = "6138661125"
 
 # Nightscout configuration
 NIGHTSCOUT_URL = "https://sennaloop-673ad2782247.herokuapp.com"
