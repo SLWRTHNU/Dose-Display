@@ -1,0 +1,8 @@
+Trend and meaning,Blood Glucose (4 and -),Blood Glucose (4.1 - 4.8),Blood Glucose (4.9 - 7),Blood Glucose (8 - 10),Blood Glucose (11 - 13),Blood Glucose (13.1 +)
+Rising rapidly (more than 1.7 mmol),Monitor,,,Monitor,Monitor; Water ++,Monitor; Bolus >16; Water ++
+Rising + (1 - 1.7 mmol),Give 2g; Monitor,,,Monitor,Monitor; Water +,Monitor; Bolus >16; Water ++
+Slow rise (0.6 - 1.1 mmol),Give 2g; Monitor,Monitor,,,Monitor; Water +,Monitor; Bolus >16; Water +
+Stable,Give 3g; Monitor,Give 2g; Monitor,🦄,🦄,Monitor,Monitor
+Slow fall (0.6 - 1.1 mmol),Give 4g; Monitor,Give 2g; Monitor,Monitor,,,
+Falling rapidly (1.1 - 1.7 mmol),"Fast snack 8g + (applesauce, honey, juice, etc.)",Give 4g; Monitor,Give 2g; Monitor,,,
+Falling very rapidly (more than 1.7 mmol),"Fast snack 8g + (applesauce, honey, juice, etc.)",Give 4-6g; Monitor,Give 2-4g; Monitor,Monitor,Monitor,
