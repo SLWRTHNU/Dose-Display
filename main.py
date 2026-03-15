@@ -68,6 +68,12 @@ class BGDisplay:
                 break
             time.sleep(1)
         if self.wlan.isconnected():
+            try:
+                import ntptime
+                ntptime.settime()
+                print("NTP synced")
+            except Exception as e:
+                print(f"NTP sync failed: {e}")
             self.show_message("Connected!", self.GREEN)
             time.sleep(1)
             return True
@@ -156,7 +162,29 @@ class BGDisplay:
             ('falling_very_rapidly', 'critical'):  '',
         }.get(key, '')
 
-    # ── Nightscout ──────────────────────────────────────────────────────────
+    # ── Nightscout write ────────────────────────────────────────────────────
+
+    def post_note(self, note):
+        """POST a Note treatment to Nightscout with the current UTC time."""
+        try:
+            t  = time.localtime()
+            ts = (f"{t[0]:04d}-{t[1]:02d}-{t[2]:02d}T"
+                  f"{t[3]:02d}:{t[4]:02d}:{t[5]:02d}.000Z")
+            body = (f'{{"eventType":"Note","notes":"{note}",'
+                    f'"created_at":"{ts}"}}')
+            r = urequests.post(
+                f"{NIGHTSCOUT_URL}/api/v1/treatments?token={NIGHTSCOUT_TOKEN}",
+                headers={"Content-Type": "application/json"},
+                data=body,
+            )
+            print(f"Note posted ({r.status_code}): {note}")
+            r.close()
+            return r.status_code in (200, 201)
+        except Exception as e:
+            print(f"Note post error: {e}")
+            return False
+
+    # ── Nightscout read ──────────────────────────────────────────────────────
 
     def fetch_nightscout(self):
         """
@@ -306,11 +334,16 @@ class BGDisplay:
                 need_redraw = False
                 loop += 1
 
-                # ── Snooze button ────────────────────────────────────────────
+                # ── Action button ────────────────────────────────────────────
                 if self.check_button():
+                    note = ("Actioned: " + self.last_action
+                            if self.last_action else "Actioned")
+                    self.show_message("Actioned!", self.GREEN)
+                    self.post_note(note)
+                    time.sleep(1)
                     self.snooze_until = time.time() + 900  # 15 minutes
                     self.override     = None               # clear any active override
-                    print("Snooze activated (15 min), override cleared")
+                    print(f"Snooze activated (15 min), note: {note!r}")
                     need_redraw = True
 
                 # ── Fetch data every ~15 s (150 × 0.1 s) ────────────────────
