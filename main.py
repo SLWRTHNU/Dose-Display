@@ -309,7 +309,8 @@ class BGDisplay:
                 # ── Snooze button ────────────────────────────────────────────
                 if self.check_button():
                     self.snooze_until = time.time() + 900  # 15 minutes
-                    print("Snooze activated (15 min)")
+                    self.override     = None               # clear any active override
+                    print("Snooze activated (15 min), override cleared")
                     need_redraw = True
 
                 # ── Fetch data every ~15 s (150 × 0.1 s) ────────────────────
