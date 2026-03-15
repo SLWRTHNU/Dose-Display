@@ -187,8 +187,8 @@ class BGDisplay:
             r.close()
             for t in treatments:
                 notes = (t.get('notes') or t.get('note') or '').strip()
-                if notes.upper().startswith('OVERRIDE:'):
-                    val      = notes[9:].strip()
+                if notes.upper().startswith('ACTION:'):
+                    val      = notes[7:].strip()
                     override = None if val.upper() == 'OFF' else val
                     break  # most-recent matching treatment wins
         except Exception as e:
