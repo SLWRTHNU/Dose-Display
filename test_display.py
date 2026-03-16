@@ -2,10 +2,16 @@
 """
 Shell preview of the three display states (160×128 px, upscaled for terminal).
 
-Images not yet on device are shown as coloured placeholder rectangles.
+Copy the .bin files off the Pico first:
+    mpremote cp :water.bin    water.bin
+    mpremote cp :jb.bin       jb.bin
+    mpremote cp :juicebox.bin juicebox.bin
 
-Usage:
+Then run:
     python3 test_display.py
+
+Real images are used when the .bin files are present; coloured placeholders
+are shown otherwise.
 """
 import sys, os
 sys.path.insert(0, os.path.dirname(__file__))
@@ -83,7 +89,26 @@ def _parse_action(action):
             return 'jb', 2
     return 'none', 0
 
-# ── placeholder image (replaces a missing .bin) ───────────────────────────────
+# ── image loading ─────────────────────────────────────────────────────────────
+
+def _load_bin(filename, w, h):
+    """Load a raw RGB565 .bin file → PIL RGB Image, or None if missing."""
+    path = os.path.join(os.path.dirname(__file__), filename)
+    if not os.path.exists(path):
+        return None
+    with open(path, 'rb') as f:
+        data = f.read()
+    img = Image.new('RGB', (w, h))
+    pixels = []
+    for i in range(0, len(data), 2):
+        word = data[i] | (data[i + 1] << 8)   # little-endian RGB565
+        r = ((word >> 11) & 0x1F) << 3
+        g = ((word >>  5) & 0x3F) << 2
+        b = ( word        & 0x1F) << 3
+        pixels.append((r, g, b))
+    img.putdata(pixels)
+    return img
+
 
 def _placeholder(w, h, color, label):
     img = Image.new('RGB', (w, h), color)
@@ -92,6 +117,15 @@ def _placeholder(w, h, color, label):
     lw  = len(label) * 6
     d.text(((w - lw) // 2, h // 2 - 4), label, fill=WHITE)
     return img
+
+
+def _image_or_placeholder(filename, w, h, placeholder_color, placeholder_label):
+    img = _load_bin(filename, w, h)
+    if img:
+        print(f"  loaded {filename}")
+        return img
+    print(f"  {filename} not found — using placeholder")
+    return _placeholder(w, h, placeholder_color, placeholder_label)
 
 # ── scene renderer ────────────────────────────────────────────────────────────
 
@@ -102,16 +136,16 @@ def render_scene(action, bg, trend):
     kind, count = _parse_action(action)
 
     if kind == 'water':
-        ph = _placeholder(80, 80, (0, 90, 180), 'WATER')
+        ph = _image_or_placeholder('water.bin', 80, 80, (0, 90, 180), 'WATER')
         img.paste(ph, (40, 4))
 
     elif kind == 'juicebox':
-        ph = _placeholder(80, 80, (200, 120, 0), 'JUICEBOX')
+        ph = _image_or_placeholder('juicebox.bin', 80, 80, (200, 120, 0), 'JUICEBOX')
         img.paste(ph, (40, 4))
 
     elif kind == 'jb':
         x0 = (DISPLAY_WIDTH - 80) // 2   # = 40
-        ph = _placeholder(40, 40, (180, 40, 40), 'JB')
+        ph = _image_or_placeholder('jb.bin', 40, 40, (180, 40, 40), 'JB')
         _draw_text_2x(draw, f"{count}x", x0, 36, WHITE)
         img.paste(ph, (x0 + 40, 24))
 
