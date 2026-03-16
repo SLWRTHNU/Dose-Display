@@ -279,10 +279,16 @@ class BGDisplay:
             self.display.fbuf.blit(self._img_juicebox, x, y)
 
         elif kind == 'jb' and self._img_jb:
-            x = (DISPLAY_WIDTH     - self._w_jb) // 2
-            y = (self.ACTION_H     - self._h_jb) // 2
-            self.display.fbuf.blit(self._img_jb, x, y)
-            self.draw_custom_text(small_font, f"{count}x", 4, 4, self.WHITE)
+            JB_GAP   = 8
+            FONT_H   = 20
+            count_str = f"{count}x"
+            txt_w = sum(small_font.get_ch(c)[2] + 1 for c in count_str) - 1
+            total_w = txt_w + JB_GAP + self._w_jb
+            x0    = (DISPLAY_WIDTH - total_w) // 2
+            img_y = (self.ACTION_H - self._h_jb) // 2
+            txt_y = img_y + (self._h_jb - FONT_H) // 2
+            self.draw_custom_text(small_font, count_str, x0, txt_y, self.WHITE)
+            self.display.fbuf.blit(self._img_jb, x0 + txt_w + JB_GAP, img_y)
 
     def draw_text_2x(self, text, x, y, color):
         """

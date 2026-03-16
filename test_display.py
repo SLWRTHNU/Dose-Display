@@ -137,9 +137,17 @@ def render_scene(action, bg, trend):
         img.paste(ph, ((DISPLAY_WIDTH - pw) // 2, (ACTION_H - ph_h) // 2))
 
     elif kind == 'jb':
+        JB_GAP    = 8
+        FONT_H    = 20
+        count_str = f"{count}x"
         ph, pw, ph_h = _image_or_placeholder('jb.bin', 60, 60, (180, 40, 40), 'JB')
-        img.paste(ph, ((DISPLAY_WIDTH - pw) // 2, (ACTION_H - ph_h) // 2))
-        _draw_custom_text(draw, small_font, f"{count}x", 4, 4, WHITE)
+        txt_w   = _text_width(small_font, count_str)
+        total_w = txt_w + JB_GAP + pw
+        x0      = (DISPLAY_WIDTH - total_w) // 2
+        img_y   = (ACTION_H - ph_h) // 2
+        txt_y   = img_y + (ph_h - FONT_H) // 2
+        _draw_custom_text(draw, small_font, count_str, x0, txt_y, WHITE)
+        img.paste(ph, (x0 + txt_w + JB_GAP, img_y))
 
     # ── BG value + trend arrow ────────────────────────────────────────────────
     bg_text = f"{bg:.1f}"
