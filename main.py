@@ -42,8 +42,9 @@ class BGDisplay:
         self._btn_last      = 1
         self._btn_last_time = 0
 
-        self._img_water = self._load_image('water.bin', 80, 80)
-        self._img_jb    = self._load_image('jb.bin',    40, 40)
+        self._img_water    = self._load_image('water.bin',    80, 80)
+        self._img_jb       = self._load_image('jb.bin',       40, 40)
+        self._img_juicebox = self._load_image('juicebox.bin', 80, 80)
 
     # ── Image loading ───────────────────────────────────────────────────────
 
@@ -250,7 +251,7 @@ class BGDisplay:
         if action == 'Water':
             return 'water', 0
         if action == 'Juicebox':
-            return 'jb', 4
+            return 'juicebox', 0
         if action.startswith('Give ') and 'JB' in action:
             try:
                 return 'jb', int(action.split()[1])
@@ -265,6 +266,10 @@ class BGDisplay:
         if kind == 'water' and self._img_water:
             # 80×80 centered in 160×88 area → x=40, y=4
             self.display.fbuf.blit(self._img_water, 40, 4)
+
+        elif kind == 'juicebox' and self._img_juicebox:
+            # 80×80 centered in 160×88 area → x=40, y=4
+            self.display.fbuf.blit(self._img_juicebox, 40, 4)
 
         elif kind == 'jb' and self._img_jb:
             # "Nx [jb image]": text(32px) + gap(8px) + image(40px) = 80px total

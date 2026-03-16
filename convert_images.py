@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 """
-Convert water.png and jb.png to raw RGB565 .bin files for the ST7735 display.
+Convert water.png, jb.png, and juicebox.png to raw RGB565 .bin files for the ST7735 display.
 
 Usage:
     pip install Pillow
     python convert_images.py
 
-Place water.png and jb.png in the same folder before running.
-Then copy water.bin and jb.bin to the Pico:
-    mpremote cp water.bin :water.bin
-    mpremote cp jb.bin    :jb.bin
+Place water.png, jb.png, and juicebox.png in the same folder before running.
+Then copy the .bin files to the Pico:
+    mpremote cp water.bin    :water.bin
+    mpremote cp jb.bin       :jb.bin
+    mpremote cp juicebox.bin :juicebox.bin
 """
 import struct
 from PIL import Image
@@ -29,6 +30,7 @@ def to_rgb565_bin(input_path, output_path, size):
 
 
 print("Converting images...")
-to_rgb565_bin('water.png', 'water.bin', (80, 80))
-to_rgb565_bin('jb.png',    'jb.bin',    (40, 40))
-print("Done. Copy water.bin and jb.bin to the Pico.")
+to_rgb565_bin('water.png',    'water.bin',    (80, 80))
+to_rgb565_bin('jb.png',       'jb.bin',       (40, 40))
+to_rgb565_bin('juicebox.png', 'juicebox.bin', (80, 80))
+print("Done. Copy water.bin, jb.bin, and juicebox.bin to the Pico.")
