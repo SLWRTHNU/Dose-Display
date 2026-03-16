@@ -42,21 +42,24 @@ class BGDisplay:
         self._btn_last      = 1
         self._btn_last_time = 0
 
-        self._img_water    = self._load_image('water.bin',    80, 80)
-        self._img_jb       = self._load_image('jb.bin',       40, 40)
-        self._img_juicebox = self._load_image('juicebox.bin', 80, 80)
+        self._img_water,    self._w_water,    self._h_water    = self._load_image('water.bin')
+        self._img_jb,       self._w_jb,       self._h_jb       = self._load_image('jb.bin')
+        self._img_juicebox, self._w_juicebox, self._h_juicebox = self._load_image('juicebox.bin')
 
     # ── Image loading ───────────────────────────────────────────────────────
 
-    def _load_image(self, filename, w, h):
-        """Load a raw RGB565 .bin file into a FrameBuffer. Returns None on error."""
+    def _load_image(self, filename):
+        """Load a raw RGB565 .bin with 4-byte header (W, H). Returns (FrameBuffer, w, h)."""
         try:
             with open(filename, 'rb') as f:
-                data = bytearray(f.read())
-            return framebuf.FrameBuffer(data, w, h, framebuf.RGB565)
+                header = f.read(4)
+                data   = bytearray(f.read())
+            w = (header[0] << 8) | header[1]
+            h = (header[2] << 8) | header[3]
+            return framebuf.FrameBuffer(data, w, h, framebuf.RGB565), w, h
         except Exception as e:
             print(f"Image load error ({filename}): {e}")
-            return None
+            return None, 0, 0
 
     # ── Button ──────────────────────────────────────────────────────────────
 
@@ -259,27 +262,27 @@ class BGDisplay:
                 return 'jb', 2
         return 'none', 0
 
+    ACTION_H = 95  # pixels available above BG text row
+
     def _draw_action(self, action):
-        """Render the action area (y=0..88) with an image or nothing."""
+        """Render the action area (y=0..ACTION_H-1) with an image or nothing."""
         kind, count = self._parse_action(action)
 
         if kind == 'water' and self._img_water:
-            # 80×80 centered in 160×88 area → x=40, y=4
-            self.display.fbuf.blit(self._img_water, 40, 4)
+            x = (DISPLAY_WIDTH     - self._w_water)    // 2
+            y = (self.ACTION_H     - self._h_water)    // 2
+            self.display.fbuf.blit(self._img_water, x, y)
 
         elif kind == 'juicebox' and self._img_juicebox:
-            # 80×80 centered in 160×88 area → x=40, y=4
-            self.display.fbuf.blit(self._img_juicebox, 40, 4)
+            x = (DISPLAY_WIDTH     - self._w_juicebox) // 2
+            y = (self.ACTION_H     - self._h_juicebox) // 2
+            self.display.fbuf.blit(self._img_juicebox, x, y)
 
         elif kind == 'jb' and self._img_jb:
-            # "Nx [jb image]": text(32px) + gap(8px) + image(40px) = 80px total
-            # Centered horizontally: x_start = (160−80)//2 = 40
-            # Both elements centered vertically in 88px area (centre y=44):
-            #   image (40px tall): y = 44−20 = 24
-            #   text  (16px tall): y = 44−8  = 36
-            x0 = (DISPLAY_WIDTH - 80) // 2  # = 40
-            self.draw_text_2x(f"{count}x", x0,      36, self.WHITE)
-            self.display.fbuf.blit(self._img_jb,    x0 + 40, 24)
+            x = (DISPLAY_WIDTH     - self._w_jb) // 2
+            y = (self.ACTION_H     - self._h_jb) // 2
+            self.display.fbuf.blit(self._img_jb, x, y)
+            self.draw_custom_text(small_font, f"{count}x", 4, 4, self.WHITE)
 
     def draw_text_2x(self, text, x, y, color):
         """

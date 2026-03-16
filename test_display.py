@@ -60,19 +60,6 @@ def _text_width(font_mod, text):
     return total - 1
 
 
-def _draw_text_2x(draw, text, x, y, color):
-    """Render text as a 16-pixel-tall block using a temp PIL image."""
-    tmp = Image.new('1', (len(text) * 8, 8), 0)
-    ImageDraw.Draw(tmp).text((0, 0), text, fill=1)
-    for py in range(8):
-        for px in range(len(text) * 8):
-            if tmp.getpixel((px, py)):
-                dx, dy = x + px * 2, y + py * 2
-                draw.point((dx,     dy    ), fill=color)
-                draw.point((dx + 1, dy    ), fill=color)
-                draw.point((dx,     dy + 1), fill=color)
-                draw.point((dx + 1, dy + 1), fill=color)
-
 # ── action parser (mirrors main.py) ──────────────────────────────────────────
 
 def _parse_action(action):
@@ -91,23 +78,29 @@ def _parse_action(action):
 
 # ── image loading ─────────────────────────────────────────────────────────────
 
-def _load_bin(filename, w, h):
-    """Load a raw RGB565 .bin file → PIL RGB Image, or None if missing."""
+ACTION_H = 95  # pixels above BG text row (y=0..94)
+
+
+def _load_bin(filename):
+    """Load a .bin with 4-byte header (W, H big-endian) → (PIL Image, w, h), or (None, 0, 0)."""
     path = os.path.join(os.path.dirname(__file__), filename)
     if not os.path.exists(path):
-        return None
+        return None, 0, 0
     with open(path, 'rb') as f:
-        data = f.read()
+        header = f.read(4)
+        data   = f.read()
+    w = (header[0] << 8) | header[1]
+    h = (header[2] << 8) | header[3]
     img = Image.new('RGB', (w, h))
     pixels = []
     for i in range(0, len(data), 2):
-        word = data[i] | (data[i + 1] << 8)   # little-endian RGB565
+        word = (data[i] << 8) | data[i + 1]   # big-endian RGB565
         r = ((word >> 11) & 0x1F) << 3
         g = ((word >>  5) & 0x3F) << 2
         b = ( word        & 0x1F) << 3
         pixels.append((r, g, b))
     img.putdata(pixels)
-    return img
+    return img, w, h
 
 
 def _placeholder(w, h, color, label):
@@ -116,16 +109,16 @@ def _placeholder(w, h, color, label):
     d.rectangle([0, 0, w - 1, h - 1], outline=WHITE)
     lw  = len(label) * 6
     d.text(((w - lw) // 2, h // 2 - 4), label, fill=WHITE)
-    return img
+    return img, w, h
 
 
-def _image_or_placeholder(filename, w, h, placeholder_color, placeholder_label):
-    img = _load_bin(filename, w, h)
+def _image_or_placeholder(filename, fallback_w, fallback_h, placeholder_color, placeholder_label):
+    img, w, h = _load_bin(filename)
     if img:
-        print(f"  loaded {filename}")
-        return img
+        print(f"  loaded {filename} ({w}x{h})")
+        return img, w, h
     print(f"  {filename} not found — using placeholder")
-    return _placeholder(w, h, placeholder_color, placeholder_label)
+    return _placeholder(fallback_w, fallback_h, placeholder_color, placeholder_label)
 
 # ── scene renderer ────────────────────────────────────────────────────────────
 
@@ -136,18 +129,17 @@ def render_scene(action, bg, trend):
     kind, count = _parse_action(action)
 
     if kind == 'water':
-        ph = _image_or_placeholder('water.bin', 80, 80, (0, 90, 180), 'WATER')
-        img.paste(ph, (40, 4))
+        ph, pw, ph_h = _image_or_placeholder('water.bin', 80, 80, (0, 90, 180), 'WATER')
+        img.paste(ph, ((DISPLAY_WIDTH - pw) // 2, (ACTION_H - ph_h) // 2))
 
     elif kind == 'juicebox':
-        ph = _image_or_placeholder('juicebox.bin', 80, 80, (200, 120, 0), 'JUICEBOX')
-        img.paste(ph, (40, 4))
+        ph, pw, ph_h = _image_or_placeholder('juicebox.bin', 80, 80, (200, 120, 0), 'JUICEBOX')
+        img.paste(ph, ((DISPLAY_WIDTH - pw) // 2, (ACTION_H - ph_h) // 2))
 
     elif kind == 'jb':
-        x0 = (DISPLAY_WIDTH - 80) // 2   # = 40
-        ph = _image_or_placeholder('jb.bin', 40, 40, (180, 40, 40), 'JB')
-        _draw_text_2x(draw, f"{count}x", x0, 36, WHITE)
-        img.paste(ph, (x0 + 40, 24))
+        ph, pw, ph_h = _image_or_placeholder('jb.bin', 60, 60, (180, 40, 40), 'JB')
+        img.paste(ph, ((DISPLAY_WIDTH - pw) // 2, (ACTION_H - ph_h) // 2))
+        _draw_custom_text(draw, small_font, f"{count}x", 4, 4, WHITE)
 
     # ── BG value + trend arrow ────────────────────────────────────────────────
     bg_text = f"{bg:.1f}"
