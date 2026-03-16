@@ -42,6 +42,21 @@ class BGDisplay:
         self._btn_last      = 1
         self._btn_last_time = 0
 
+        self._img_water = self._load_image('water.bin', 80, 80)
+        self._img_jb    = self._load_image('jb.bin',    40, 40)
+
+    # ── Image loading ───────────────────────────────────────────────────────
+
+    def _load_image(self, filename, w, h):
+        """Load a raw RGB565 .bin file into a FrameBuffer. Returns None on error."""
+        try:
+            with open(filename, 'rb') as f:
+                data = bytearray(f.read())
+            return framebuf.FrameBuffer(data, w, h, framebuf.RGB565)
+        except Exception as e:
+            print(f"Image load error ({filename}): {e}")
+            return None
+
     # ── Button ──────────────────────────────────────────────────────────────
 
     def check_button(self):
@@ -106,10 +121,10 @@ class BGDisplay:
         key = (self.get_trend_cat(trend), self.get_bg_range(bg))
         return {
             # Rising rapidly (>1.7 mmol/L delta)
-            ('rising_rapidly', 'very_low'):  'Monitor',
+            ('rising_rapidly', 'very_low'):  '',
             ('rising_rapidly', 'low'):       '',
             ('rising_rapidly', 'target'):    '',
-            ('rising_rapidly', 'high'):      'Monitor',
+            ('rising_rapidly', 'high'):      '',
             ('rising_rapidly', 'very_high'): 'Water',
             ('rising_rapidly', 'critical'):  'Water',
 
@@ -117,13 +132,13 @@ class BGDisplay:
             ('rising', 'very_low'):  'Give 2 JB',
             ('rising', 'low'):       '',
             ('rising', 'target'):    '',
-            ('rising', 'high'):      'Monitor',
+            ('rising', 'high'):      '',
             ('rising', 'very_high'): 'Water',
             ('rising', 'critical'):  'Water',
 
             # Slow rise (0.6–1.1 mmol/L delta)
             ('slow_rise', 'very_low'):  'Give 2 JB',
-            ('slow_rise', 'low'):       'Monitor',
+            ('slow_rise', 'low'):       '',
             ('slow_rise', 'target'):    '',
             ('slow_rise', 'high'):      '',
             ('slow_rise', 'very_high'): 'Water',
@@ -134,13 +149,13 @@ class BGDisplay:
             ('stable', 'low'):       'Give 2 JB',
             ('stable', 'target'):    '',
             ('stable', 'high'):      '',
-            ('stable', 'very_high'): 'Monitor',
-            ('stable', 'critical'):  'Monitor',
+            ('stable', 'very_high'): '',
+            ('stable', 'critical'):  '',
 
             # Slow fall (0.6–1.1 mmol/L delta)
             ('slow_fall', 'very_low'):  'Give 4 JB',
             ('slow_fall', 'low'):       'Give 2 JB',
-            ('slow_fall', 'target'):    'Monitor',
+            ('slow_fall', 'target'):    '',
             ('slow_fall', 'high'):      '',
             ('slow_fall', 'very_high'): '',
             ('slow_fall', 'critical'):  '',
@@ -155,10 +170,10 @@ class BGDisplay:
 
             # Falling very rapidly (>1.7 mmol/L delta)
             ('falling_very_rapidly', 'very_low'):  'Juicebox',
-            ('falling_very_rapidly', 'low'):       'Give 5 JB',  # 4–6g → middle
-            ('falling_very_rapidly', 'target'):    'Give 3 JB',  # 2–4g → middle
-            ('falling_very_rapidly', 'high'):      'Monitor',
-            ('falling_very_rapidly', 'very_high'): 'Monitor',
+            ('falling_very_rapidly', 'low'):       'Give 5 JB',
+            ('falling_very_rapidly', 'target'):    'Give 3 JB',
+            ('falling_very_rapidly', 'high'):      '',
+            ('falling_very_rapidly', 'very_high'): '',
             ('falling_very_rapidly', 'critical'):  '',
         }.get(key, '')
 
@@ -226,13 +241,40 @@ class BGDisplay:
 
     # ── Drawing ─────────────────────────────────────────────────────────────
 
-    def action_color(self, action):
-        if 'Juicebox' in action:                                    return self.RED
-        if 'Give 4' in action or 'Give 5' in action \
-                              or 'Give 6' in action:                return self.ORANGE
-        if 'Give' in action:                                        return self.YELLOW
-        if 'Water' in action:                                       return self.BLUE
-        return self.WHITE  # Monitor
+    # ── Action image rendering ──────────────────────────────────────────────
+
+    def _parse_action(self, action):
+        """Return ('water', 0), ('jb', N), or ('none', 0)."""
+        if not action:
+            return 'none', 0
+        if action == 'Water':
+            return 'water', 0
+        if action == 'Juicebox':
+            return 'jb', 4
+        if action.startswith('Give ') and 'JB' in action:
+            try:
+                return 'jb', int(action.split()[1])
+            except Exception:
+                return 'jb', 2
+        return 'none', 0
+
+    def _draw_action(self, action):
+        """Render the action area (y=0..88) with an image or nothing."""
+        kind, count = self._parse_action(action)
+
+        if kind == 'water' and self._img_water:
+            # 80×80 centered in 160×88 area → x=40, y=4
+            self.display.fbuf.blit(self._img_water, 40, 4)
+
+        elif kind == 'jb' and self._img_jb:
+            # "Nx [jb image]": text(32px) + gap(8px) + image(40px) = 80px total
+            # Centered horizontally: x_start = (160−80)//2 = 40
+            # Both elements centered vertically in 88px area (centre y=44):
+            #   image (40px tall): y = 44−20 = 24
+            #   text  (16px tall): y = 44−8  = 36
+            x0 = (DISPLAY_WIDTH - 80) // 2  # = 40
+            self.draw_text_2x(f"{count}x", x0,      36, self.WHITE)
+            self.display.fbuf.blit(self._img_jb,    x0 + 40, 24)
 
     def draw_text_2x(self, text, x, y, color):
         """
@@ -281,13 +323,8 @@ class BGDisplay:
         """Full frame draw: action area + BG/arrow + blink dot."""
         self.display.fill(self.BLACK)
 
-        # ── Action (upper area, 2× scale text) ──────────────────────────────
-        if action:
-            col = self.action_color(action)
-            tw  = len(action) * 16          # 8 px * 2× = 16 px per char
-            tx  = max(0, (DISPLAY_WIDTH - tw) // 2)
-            ty  = 30
-            self.draw_text_2x(action, tx, ty, col)
+        # ── Action (upper area: y=0..88) ─────────────────────────────────────
+        self._draw_action(action)
 
         # ── BG value + trend arrow (bottom strip) ────────────────────────────
         bg_text = f"{bg:.1f}"
