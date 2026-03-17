@@ -37,6 +37,7 @@ class BGDisplay:
         self.override    = None  # None or action string
         self.snooze_until = 0   # time.time() + 900 when active
         self.blink_state = False
+        self._next_treatment_fetch = 0  # fetch treatments on first loop
 
         self.button = Pin(PIN_BUTTON, Pin.IN, Pin.PULL_UP)
         self._btn_last      = 1
@@ -205,28 +206,21 @@ class BGDisplay:
 
     # ── Nightscout read ──────────────────────────────────────────────────────
 
-    def fetch_nightscout(self):
-        """
-        Returns (bg_mmol_or_None, trend_str_or_None, override_str_or_None).
-        override is None  → no active override
-        override is ''    → 'OVERRIDE: OFF' was the most recent override note
-        override is str   → show that string regardless of chart/snooze
-        On network error, existing self.override is preserved.
-        """
-        bg, trend = None, None
-        override = self.override  # keep current on error
-
+    def fetch_bg(self):
+        """Fetch latest BG entry. Returns (bg_mmol, trend) or (None, None) on error."""
         try:
             r    = urequests.get(
                 f"{NIGHTSCOUT_URL}/api/v1/entries.json?count=1&token={NIGHTSCOUT_TOKEN}")
             data = r.json()
             r.close()
             if data:
-                bg    = data[0]['sgv'] / 18.0
-                trend = data[0].get('direction', 'Flat')
+                return data[0]['sgv'] / 18.0, data[0].get('direction', 'Flat')
         except Exception as e:
             print(f"BG fetch error: {e}")
+        return None, None
 
+    def fetch_treatments(self):
+        """Fetch latest ACTION: override from treatments. Updates self.override in place."""
         try:
             r          = urequests.get(
                 f"{NIGHTSCOUT_URL}/api/v1/treatments.json?count=15&token={NIGHTSCOUT_TOKEN}")
@@ -235,13 +229,11 @@ class BGDisplay:
             for t in treatments:
                 notes = (t.get('notes') or t.get('note') or '').strip()
                 if notes.upper().startswith('ACTION:'):
-                    val      = notes[7:].strip()
-                    override = None if val.upper() == 'OFF' else val
-                    break  # most-recent matching treatment wins
+                    val          = notes[7:].strip()
+                    self.override = None if val.upper() == 'OFF' else val
+                    return
         except Exception as e:
             print(f"Treatment fetch error: {e}")
-
-        return bg, trend, override
 
     # ── Drawing ─────────────────────────────────────────────────────────────
 
@@ -397,18 +389,24 @@ class BGDisplay:
                     print(f"Snooze activated (15 min), note: {note!r}")
                     need_redraw = True
 
-                # ── Fetch data every ~15 s (150 × 0.1 s) ────────────────────
+                # ── Fetch BG every 15 s (150 × 0.1 s) ───────────────────────
                 if loop % 150 == 0:
-                    bg, trend, override = self.fetch_nightscout()
+                    bg, trend = self.fetch_bg()
                     if bg is not None:
                         self.last_bg     = bg
                         self.last_trend  = trend
                         self.last_action = self.get_chart_action(bg, trend)
                         need_redraw      = True
-                    self.override = override
                     if self.last_bg is not None:
                         print(f"BG:{self.last_bg:.1f} Trend:{self.last_trend} "
                               f"Action:{self.last_action!r} Override:{self.override!r}")
+
+                # ── Fetch treatments every 5 min ─────────────────────────────
+                now = time.time()
+                if now >= self._next_treatment_fetch:
+                    self.fetch_treatments()
+                    self._next_treatment_fetch = now + 300
+                    need_redraw = True
 
                 # ── Blink every 0.5 s ────────────────────────────────────────
                 if loop % 5 == 0:
