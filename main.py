@@ -100,6 +100,22 @@ class BGDisplay:
         self.show_message("WiFi Failed!", self.RED)
         return False
 
+    def ensure_wifi(self):
+        """Silently reconnect if WiFi dropped. Returns True if connected."""
+        if self.wlan.isconnected():
+            return True
+        print("WiFi lost, reconnecting...")
+        self.wlan.disconnect()
+        time.sleep(1)
+        self.wlan.connect(WIFI_SSID, WIFI_PASSWORD)
+        for _ in range(20):
+            if self.wlan.isconnected():
+                print("WiFi reconnected")
+                return True
+            time.sleep(1)
+        print("WiFi reconnect failed")
+        return False
+
     # ── Chart logic ─────────────────────────────────────────────────────────
 
     def get_bg_range(self, bg):
@@ -208,6 +224,8 @@ class BGDisplay:
 
     def fetch_bg(self):
         """Fetch latest BG entry. Returns (bg_mmol, trend) or (None, None) on error."""
+        if not self.ensure_wifi():
+            return None, None
         try:
             r    = urequests.get(
                 f"{NIGHTSCOUT_URL}/api/v1/entries.json?count=1&token={NIGHTSCOUT_TOKEN}")
@@ -221,6 +239,8 @@ class BGDisplay:
 
     def fetch_treatments(self):
         """Fetch latest ACTION: override from treatments. Updates self.override in place."""
+        if not self.ensure_wifi():
+            return
         try:
             r          = urequests.get(
                 f"{NIGHTSCOUT_URL}/api/v1/treatments.json?count=15&token={NIGHTSCOUT_TOKEN}")
