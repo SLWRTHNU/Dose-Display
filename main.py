@@ -37,6 +37,7 @@ class BGDisplay:
         self.override    = None  # None or action string
         self.snooze_until = 0   # time.time() + 900 when active
         self.blink_state = False
+        self._fetch_fail_count = 0
 
         self.button = Pin(PIN_BUTTON, Pin.IN, Pin.PULL_UP)
         self._btn_last      = 1
@@ -99,13 +100,16 @@ class BGDisplay:
         self.show_message("WiFi Failed!", self.RED)
         return False
 
-    def ensure_wifi(self):
-        """Silently reconnect if WiFi dropped. Returns True if connected."""
-        if self.wlan.isconnected():
+    def ensure_wifi(self, force=False):
+        """Check WiFi and reconnect if needed. force=True reconnects even if associated."""
+        if not force and self.wlan.isconnected():
             return True
-        print("WiFi lost, reconnecting...")
-        self.wlan.disconnect()
-        time.sleep(1)
+        print("WiFi reconnecting...")
+        try:
+            self.wlan.disconnect()
+        except Exception:
+            pass
+        time.sleep_ms(500)
         self.wlan.connect(WIFI_SSID, WIFI_PASSWORD)
         for _ in range(20):
             if self.wlan.isconnected():
@@ -268,7 +272,7 @@ class BGDisplay:
         try:
             addr = usocket.getaddrinfo(h, port)[0][-1]
             s = usocket.socket()
-            s.settimeout(5)
+            s.settimeout(10)
             s.connect(addr)
             if scheme == 'https':
                 s = ssl.wrap_socket(s, server_hostname=h)
@@ -277,7 +281,7 @@ class BGDisplay:
             buf = bytearray()
             CAP = max_body + 512
             t0 = time.ticks_ms()
-            while time.ticks_diff(time.ticks_ms(), t0) < 3000:
+            while time.ticks_diff(time.ticks_ms(), t0) < 8000:
                 try:
                     chunk = s.recv(256)
                 except OSError:
@@ -502,12 +506,19 @@ class BGDisplay:
             try:
                 bg, trend = self.fetch_bg()
                 if bg is not None:
+                    self._fetch_fail_count = 0
                     self.last_bg     = bg
                     self.last_trend  = trend
                     self.last_action = self.get_chart_action(bg, trend)
                     self._do_render()
                     print(f"BG:{bg:.1f} Trend:{trend} "
                           f"Action:{self.last_action!r} Override:{self.override!r}")
+                else:
+                    self._fetch_fail_count += 1
+                    if self._fetch_fail_count >= 3:
+                        print(f"3 consecutive fetch failures — forcing WiFi reconnect")
+                        self._fetch_fail_count = 0
+                        self.ensure_wifi(force=True)
             except Exception as e:
                 print(f"BG task error: {e}")
             await asyncio.sleep_ms(5000)
