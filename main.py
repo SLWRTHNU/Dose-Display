@@ -2,9 +2,9 @@
 Nightscout Blood Glucose Display for Pico 2 W
 """
 import network
-import urequests
 import time
 import framebuf
+import uasyncio as asyncio
 from machine import Pin, SPI
 from st7735 import ST7735
 from config import *
@@ -37,7 +37,6 @@ class BGDisplay:
         self.override    = None  # None or action string
         self.snooze_until = 0   # time.time() + 900 when active
         self.blink_state = False
-        self._next_treatment_fetch = 0  # fetch treatments on first loop
 
         self.button = Pin(PIN_BUTTON, Pin.IN, Pin.PULL_UP)
         self._btn_last      = 1
@@ -220,40 +219,143 @@ class BGDisplay:
             print(f"Note post error: {e}")
             return False
 
+    # ── HTTP helpers (ported from Iris Mini) ────────────────────────────────
+
+    @staticmethod
+    def _find_int_after(s, key, start=0):
+        i = s.find(key, start)
+        if i < 0: return None, -1
+        i += len(key)
+        while i < len(s) and s[i] in ' \t\r\n': i += 1
+        j = i
+        if j < len(s) and s[j] == '-': j += 1
+        while j < len(s) and s[j].isdigit(): j += 1
+        if j == i or (j == i + 1 and s[i] == '-'): return None, -1
+        return int(s[i:j]), j
+
+    @staticmethod
+    def _find_str_after(s, key, start=0):
+        i = s.find(key, start)
+        if i < 0: return None, -1
+        i += len(key)
+        while i < len(s) and s[i] in ' \t\r\n': i += 1
+        q1 = s.find('"', i)
+        if q1 < 0: return None, -1
+        q2 = s.find('"', q1 + 1)
+        if q2 < 0: return None, -1
+        return s[q1 + 1:q2], q2 + 1
+
+    def _http_get(self, url, max_body=2048):
+        """Raw socket HTTP/HTTPS GET. Returns body bytes or None."""
+        import usocket, ssl, gc
+        gc.collect()
+        if url.startswith('https://'):
+            scheme, rest, port = 'https', url[8:], 443
+        elif url.startswith('http://'):
+            scheme, rest, port = 'http', url[7:], 80
+        else:
+            return None
+        slash = rest.find('/')
+        if slash >= 0:
+            hostport, path = rest[:slash], rest[slash:]
+        else:
+            hostport, path = rest, '/'
+        if ':' in hostport:
+            h, p = hostport.split(':', 1); port = int(p)
+        else:
+            h = hostport
+        s = None
+        try:
+            addr = usocket.getaddrinfo(h, port)[0][-1]
+            s = usocket.socket()
+            s.settimeout(5)
+            s.connect(addr)
+            if scheme == 'https':
+                s = ssl.wrap_socket(s, server_hostname=h)
+            s.send(('GET {} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n\r\n'
+                    .format(path, h)).encode('utf-8'))
+            buf = bytearray()
+            CAP = max_body + 512
+            t0 = time.ticks_ms()
+            while time.ticks_diff(time.ticks_ms(), t0) < 3000:
+                try:
+                    chunk = s.recv(256)
+                except OSError:
+                    break
+                if not chunk: break
+                take = min(len(chunk), CAP - len(buf))
+                if take <= 0: break
+                buf.extend(chunk[:take])
+        except Exception as e:
+            print(f'HTTP error: {e}')
+            return None
+        finally:
+            try:
+                if s: s.close()
+            except: pass
+        raw = bytes(buf)
+        sep = raw.find(b'\r\n\r\n')
+        if sep < 0: return None
+        head = raw[:sep].decode('utf-8', 'ignore')
+        body = raw[sep + 4: sep + 4 + max_body]
+        try:
+            status = int(head.split('\r\n', 1)[0].split(' ')[1])
+        except: return None
+        if status in (301, 302, 303, 307, 308):
+            for line in head.split('\r\n'):
+                if line.lower().startswith('location:'):
+                    return self._http_get(line.split(':', 1)[1].strip(), max_body)
+            return None
+        return body if status == 200 else None
+
     # ── Nightscout read ──────────────────────────────────────────────────────
 
     def fetch_bg(self):
         """Fetch latest BG entry. Returns (bg_mmol, trend) or (None, None) on error."""
         if not self.ensure_wifi():
             return None, None
+        body = self._http_get(
+            '{}/api/v1/entries.json?count=1&token={}'.format(NIGHTSCOUT_URL, NIGHTSCOUT_TOKEN))
+        if not body:
+            return None, None
         try:
-            r    = urequests.get(
-                f"{NIGHTSCOUT_URL}/api/v1/entries.json?count=1&token={NIGHTSCOUT_TOKEN}")
-            data = r.json()
-            r.close()
-            if data:
-                return data[0]['sgv'] / 18.0, data[0].get('direction', 'Flat')
+            txt = body.decode('utf-8', 'ignore')
+            sgv, _ = self._find_int_after(txt, '"sgv":')
+            if sgv is None:
+                return None, None
+            direction, _ = self._find_str_after(txt, '"direction":')
+            return sgv / 18.0, direction or 'Flat'
         except Exception as e:
-            print(f"BG fetch error: {e}")
-        return None, None
+            print(f'BG parse error: {e}')
+            return None, None
 
     def fetch_treatments(self):
         """Fetch latest ACTION: override from treatments. Updates self.override in place."""
         if not self.ensure_wifi():
             return
+        body = self._http_get(
+            '{}/api/v1/treatments.json?count=15&token={}'.format(NIGHTSCOUT_URL, NIGHTSCOUT_TOKEN),
+            max_body=4096)
+        if not body:
+            return
         try:
-            r          = urequests.get(
-                f"{NIGHTSCOUT_URL}/api/v1/treatments.json?count=15&token={NIGHTSCOUT_TOKEN}")
-            treatments = r.json()
-            r.close()
-            for t in treatments:
-                notes = (t.get('notes') or t.get('note') or '').strip()
-                if notes.upper().startswith('ACTION:'):
-                    val          = notes[7:].strip()
+            txt = body.decode('utf-8', 'ignore')
+            pos = 0
+            while True:
+                notes, p1 = self._find_str_after(txt, '"notes":', pos)
+                note,  p2 = self._find_str_after(txt, '"note":', pos)
+                if notes is not None and (note is None or p1 <= p2):
+                    val_str, pos = notes, p1
+                elif note is not None:
+                    val_str, pos = note, p2
+                else:
+                    break
+                if val_str.upper().startswith('ACTION:'):
+                    val = val_str[7:].strip()
                     self.override = None if val.upper() == 'OFF' else val
                     return
         except Exception as e:
-            print(f"Treatment fetch error: {e}")
+            print(f'Treatment parse error: {e}')
 
     # ── Drawing ─────────────────────────────────────────────────────────────
 
@@ -380,79 +482,88 @@ class BGDisplay:
 
         self.display.show()
 
-    # ── Main loop ───────────────────────────────────────────────────────────
+    # ── Render helper ────────────────────────────────────────────────────────
 
-    def run(self):
-        self.show_message("BG Display\nStarting...", self.BLUE)
-        time.sleep(1)
+    def _do_render(self):
+        if self.last_bg is None:
+            self.show_message("Waiting for\ndata...", self.YELLOW)
+        elif self.override:
+            self.render(self.last_bg, self.last_trend, self.override, self.ORANGE)
+        elif time.time() < self.snooze_until:
+            self.render(self.last_bg, self.last_trend, '', self.BLUE)
+        else:
+            self.render(self.last_bg, self.last_trend, self.last_action, self.WHITE)
 
-        if not self.connect_wifi():
-            self.show_message("Check WiFi\nSettings", self.RED)
-            return
+    # ── Async tasks ──────────────────────────────────────────────────────────
 
-        loop = 149  # starts at 149 so first iteration triggers a fetch
-
+    async def _task_fetch_bg(self):
+        """Fetch BG every 5 s (matches Iris Mini poll rate)."""
         while True:
             try:
-                need_redraw = False
-                loop += 1
+                bg, trend = self.fetch_bg()
+                if bg is not None:
+                    self.last_bg     = bg
+                    self.last_trend  = trend
+                    self.last_action = self.get_chart_action(bg, trend)
+                    self._do_render()
+                    print(f"BG:{bg:.1f} Trend:{trend} "
+                          f"Action:{self.last_action!r} Override:{self.override!r}")
+            except Exception as e:
+                print(f"BG task error: {e}")
+            await asyncio.sleep_ms(5000)
 
-                # ── Action button ────────────────────────────────────────────
+    async def _task_fetch_treatments(self):
+        """Fetch override treatments every 5 min."""
+        while True:
+            try:
+                self.fetch_treatments()
+            except Exception as e:
+                print(f"Treatment task error: {e}")
+            await asyncio.sleep_ms(300_000)
+
+    async def _task_blink(self):
+        """Toggle blink dot every 500 ms."""
+        while True:
+            self.blink_state = not self.blink_state
+            self._do_render()
+            await asyncio.sleep_ms(500)
+
+    async def _task_button(self):
+        """Poll action button every 50 ms."""
+        while True:
+            try:
                 if self.check_button():
                     note = ("Actioned: " + self.last_action
                             if self.last_action else "Actioned")
                     self.show_message("Actioned!", self.GREEN)
                     self.post_note(note)
-                    time.sleep(1)
-                    self.snooze_until = time.time() + 900  # 15 minutes
-                    self.override     = None               # clear any active override
+                    await asyncio.sleep_ms(1000)
+                    self.snooze_until = time.time() + 900
+                    self.override     = None
                     print(f"Snooze activated (15 min), note: {note!r}")
-                    need_redraw = True
-
-                # ── Fetch BG every 15 s (150 × 0.1 s) ───────────────────────
-                if loop % 150 == 0:
-                    bg, trend = self.fetch_bg()
-                    if bg is not None:
-                        self.last_bg     = bg
-                        self.last_trend  = trend
-                        self.last_action = self.get_chart_action(bg, trend)
-                        need_redraw      = True
-                    if self.last_bg is not None:
-                        print(f"BG:{self.last_bg:.1f} Trend:{self.last_trend} "
-                              f"Action:{self.last_action!r} Override:{self.override!r}")
-
-                # ── Fetch treatments every 5 min ─────────────────────────────
-                now = time.time()
-                if now >= self._next_treatment_fetch:
-                    self.fetch_treatments()
-                    self._next_treatment_fetch = now + 300
-                    need_redraw = True
-
-                # ── Blink every 0.5 s ────────────────────────────────────────
-                if loop % 5 == 0:
-                    self.blink_state = not self.blink_state
-                    need_redraw = True
-
-                # ── Redraw ───────────────────────────────────────────────────
-                if need_redraw:
-                    if self.last_bg is None:
-                        self.show_message("Waiting for\ndata...", self.YELLOW)
-                    elif self.override:
-                        # Remote override: show it, ignore chart & snooze
-                        self.render(self.last_bg, self.last_trend,
-                                    self.override, self.ORANGE)
-                    elif time.time() < self.snooze_until:
-                        # Snoozed: blank action area, show BG only
-                        self.render(self.last_bg, self.last_trend, '', self.BLUE)
-                    else:
-                        # Normal chart-driven display
-                        self.render(self.last_bg, self.last_trend,
-                                    self.last_action, self.WHITE)
-
+                    self._do_render()
             except Exception as e:
-                print(f"Loop error: {e}")
+                print(f"Button task error: {e}")
+            await asyncio.sleep_ms(50)
 
-            time.sleep(0.1)
+    async def _async_main(self):
+        asyncio.create_task(self._task_fetch_bg())
+        asyncio.create_task(self._task_fetch_treatments())
+        asyncio.create_task(self._task_blink())
+        asyncio.create_task(self._task_button())
+        while True:
+            await asyncio.sleep(60)
+
+    # ── Entry point ──────────────────────────────────────────────────────────
+
+    def run(self):
+        self.show_message("BG Display\nStarting...", self.BLUE)
+        time.sleep(1)
+        if not self.connect_wifi():
+            self.show_message("Check WiFi\nSettings", self.RED)
+            return
+        self.show_message("Waiting for\ndata...", self.YELLOW)
+        asyncio.run(self._async_main())
 
 
 if __name__ == "__main__":
