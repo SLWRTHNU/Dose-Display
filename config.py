@@ -19,6 +19,9 @@ BG_ARROW_GAP = 8  # Gap in pixels between BG value and arrow (adjustable)
 # Snooze button pin (wire one leg to GP15, other leg to GND — no resistor needed)
 PIN_BUTTON = 15
 
+# Buzzer pin (active buzzer: + leg to GP14, − leg to GND)
+PIN_BUZZER = 14
+
 # Display pins for Waveshare 19579 (ST7735S)
 DISPLAY_WIDTH = 160
 DISPLAY_HEIGHT = 128

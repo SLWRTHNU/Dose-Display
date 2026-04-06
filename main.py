@@ -43,6 +43,9 @@ class BGDisplay:
         self._btn_last      = 1
         self._btn_last_time = 0
 
+        self.buzzer = Pin(PIN_BUZZER, Pin.OUT, value=0)
+        self._last_beeped_action = None
+
         self._img_water,    self._w_water,    self._h_water    = self._load_image('water.bin')
         self._img_jb,       self._w_jb,       self._h_jb       = self._load_image('jb.bin')
         self._img_juicebox, self._w_juicebox, self._h_juicebox = self._load_image('juicebox.bin')
@@ -486,17 +489,39 @@ class BGDisplay:
 
         self.display.show()
 
+    # ── Buzzer ───────────────────────────────────────────────────────────────
+
+    async def _buzz(self):
+        """2 short beeps: 100 ms on, 150 ms off, 100 ms on."""
+        for _ in range(2):
+            self.buzzer.value(1)
+            await asyncio.sleep_ms(100)
+            self.buzzer.value(0)
+            await asyncio.sleep_ms(150)
+
     # ── Render helper ────────────────────────────────────────────────────────
 
     def _do_render(self):
         if self.last_bg is None:
             self.show_message("Waiting for\ndata...", self.YELLOW)
-        elif self.override:
-            self.render(self.last_bg, self.last_trend, self.override, self.ORANGE)
+            return
+
+        if self.override:
+            action, dot = self.override, self.ORANGE
         elif time.time() < self.snooze_until:
-            self.render(self.last_bg, self.last_trend, '', self.BLUE)
+            action, dot = '', self.BLUE
         else:
-            self.render(self.last_bg, self.last_trend, self.last_action, self.WHITE)
+            action, dot = self.last_action, self.WHITE
+
+        # Buzz when a new non-empty action is first shown
+        if action:
+            if action != self._last_beeped_action:
+                self._last_beeped_action = action
+                asyncio.create_task(self._buzz())
+        else:
+            self._last_beeped_action = None
+
+        self.render(self.last_bg, self.last_trend, action, dot)
 
     # ── Async tasks ──────────────────────────────────────────────────────────
 
@@ -549,8 +574,9 @@ class BGDisplay:
                     self.show_message("Actioned!", self.GREEN)
                     self.post_note(note)
                     await asyncio.sleep_ms(1000)
-                    self.snooze_until = time.time() + 900
-                    self.override     = None
+                    self.snooze_until        = time.time() + 900
+                    self.override            = None
+                    self._last_beeped_action = None  # re-beep when snooze expires
                     print(f"Snooze activated (15 min), note: {note!r}")
                     self._do_render()
             except Exception as e:
