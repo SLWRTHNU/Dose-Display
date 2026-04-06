@@ -105,20 +105,25 @@ class ST7735:
         self.spi.write(self.buffer)
         self.cs.value(1)
         
+    @staticmethod
+    def _swap(color):
+        """framebuf.RGB565 is little-endian; ST7735 SPI expects big-endian."""
+        return ((color & 0xFF) << 8) | (color >> 8)
+
     def fill(self, color):
-        self.fbuf.fill(color)
-        
+        self.fbuf.fill(self._swap(color))
+
     def pixel(self, x, y, color):
-        self.fbuf.pixel(x, y, color)
-        
+        self.fbuf.pixel(x, y, self._swap(color))
+
     def text(self, string, x, y, color):
-        self.fbuf.text(string, x, y, color)
-        
+        self.fbuf.text(string, x, y, self._swap(color))
+
     def line(self, x1, y1, x2, y2, color):
-        self.fbuf.line(x1, y1, x2, y2, color)
-        
+        self.fbuf.line(x1, y1, x2, y2, self._swap(color))
+
     def rect(self, x, y, w, h, color):
-        self.fbuf.rect(x, y, w, h, color)
-        
+        self.fbuf.rect(x, y, w, h, self._swap(color))
+
     def fill_rect(self, x, y, w, h, color):
-        self.fbuf.fill_rect(x, y, w, h, color)
+        self.fbuf.fill_rect(x, y, w, h, self._swap(color))

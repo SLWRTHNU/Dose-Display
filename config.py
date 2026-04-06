@@ -4,7 +4,7 @@ Configuration file for Nightscout BG Display
 
 # WiFi credentials
 WIFI_SSID = "2.4G"
-WIFI_PASSWORD = "JohnBerry"
+WIFI_PASSWORD = "Theworks1!"
 
 # Nightscout configuration
 NIGHTSCOUT_URL = "https://sennaloop-673ad2782247.herokuapp.com"
@@ -15,6 +15,9 @@ UPDATE_INTERVAL = 15
 
 # Display layout
 BG_ARROW_GAP = 8  # Gap in pixels between BG value and arrow (adjustable)
+
+# Snooze button pin (wire one leg to GP15, other leg to GND — no resistor needed)
+PIN_BUTTON = 15
 
 # Display pins for Waveshare 19579 (ST7735S)
 DISPLAY_WIDTH = 160
